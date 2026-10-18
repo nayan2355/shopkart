@@ -21,14 +21,17 @@ def close_connection(exception):
 
 @app.route('/login', methods=['GET','POST'])
 def login():
-    if request.method == 'POST':
-        phone = request.form.get('phone')
-        if phone and len(phone) >= 10:
-            session['logged_in'] = True
-            session['phone'] = phone
-            session['cart'] = []
-            return redirect('/')
     return render_template('login.html')
+
+@app.route('/set_login')
+def set_login():
+    phone = request.args.get('phone')
+    if phone:
+        session['logged_in'] = True
+        session['phone'] = phone
+        if 'cart' not in session:
+            session['cart'] = []
+    return redirect('/')
 
 @app.route('/')
 def home():
@@ -41,6 +44,8 @@ def home():
 
 @app.route('/add_to_cart/<int:pid>')
 def add_to_cart(pid):
+    if not session.get('logged_in'):
+        return redirect('/login')
     cart = session.get('cart', [])
     cart.append(pid)
     session['cart'] = cart
@@ -65,3 +70,11 @@ def cart():
 def clear_cart():
     session['cart'] = []
     return redirect('/cart')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect('/login')
+
+if __name__ == '__main__':
+    app.run(debug=True)
