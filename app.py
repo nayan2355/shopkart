@@ -1,62 +1,67 @@
-from flask import Flask, render_template, session, redirect, request
-import sqlite3, os
+from flask import Flask, render_template, request, redirect, session, g
+import sqlite3
 
 app = Flask(__name__)
-app.secret_key = 'shopkart_secret_123'
+app.secret_key = "goldify123"
 
-def init_db():
-    conn = sqlite3.connect('products.db')
-    c = conn.cursor()
-    c.execute('CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, price INTEGER, image TEXT)')
-    c.execute("SELECT COUNT(*) FROM products")
-    if c.fetchone()[0] == 0:
-        data = [
-            ('iPhone 15 - 128GB', 70999, 'https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=300'),
-            ('MacBook Air M2', 95999, 'https://images.unsplash.com/photo-1541807084-5c52b6b3adef?w=300'),
-            ('Sony Headphone', 26990, 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=300'),
-            ('Apple Watch S9', 41900, 'https://images.unsplash.com/photo-1555421689-3f034debb7a6?w=300')
-        ]
-        c.executemany("INSERT INTO products (name, price, image) VALUES (?,?,?)", data)
-    conn.commit()
-    conn.close()
+DATABASE = 'products.db'
 
-init_db()
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DATABASE)
+        db.row_factory = sqlite3.Row
+    return db
+
+@app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
+
+@app.route('/login', methods=['GET','POST'])
+def login():
+    if request.method == 'POST':
+        phone = request.form.get('phone')
+        if phone and len(phone) >= 10:
+            session['logged_in'] = True
+            session['phone'] = phone
+            session['cart'] = []
+            return redirect('/')
+    return render_template('login.html')
 
 @app.route('/')
 def home():
-    conn = sqlite3.connect('products.db')
-    conn.row_factory = sqlite3.Row
-    products = conn.execute("SELECT * FROM products").fetchall()
-    conn.close()
-    cart_count = len(session.get('cart', []))
-    return render_template('index.html', products=products, cart_count=cart_count)
+    if not session.get('logged_in'):
+        return redirect('/login')
+    db = get_db()
+    products = db.execute('SELECT * FROM products').fetchall()
+    prod_list = [{'id':p['id'],'name':p['name'],'price':p['price'],'image':p['image']} for p in products]
+    return render_template('index.html', products=prod_list, cart_count=len(session.get('cart',[])))
 
-@app.route('/add_to_cart/<int:product_id>')
-def add_to_cart(product_id):
+@app.route('/add_to_cart/<int:pid>')
+def add_to_cart(pid):
     cart = session.get('cart', [])
-    cart.append(product_id)
+    cart.append(pid)
     session['cart'] = cart
     return redirect('/')
 
 @app.route('/cart')
 def cart():
+    if not session.get('logged_in'):
+        return redirect('/login')
     cart_ids = session.get('cart', [])
-    if not cart_ids:
-        return render_template('cart.html', products=[], total=0)
-
-    conn = sqlite3.connect('products.db')
-    conn.row_factory = sqlite3.Row
-    placeholders = ','.join('?'*len(cart_ids))
-    products = conn.execute(f"SELECT * FROM products WHERE id IN ({placeholders})", cart_ids).fetchall()
-    conn.close()
-    total = sum([p['price'] for p in products])
+    db = get_db()
+    products = []
+    total = 0
+    for pid in cart_ids:
+        p = db.execute('SELECT * FROM products WHERE id=?',(pid,)).fetchone()
+        if p:
+            products.append({'name':p['name'],'price':p['price'],'image':p['image']})
+            total += p['price']
     return render_template('cart.html', products=products, total=total)
 
 @app.route('/clear_cart')
 def clear_cart():
     session['cart'] = []
     return redirect('/cart')
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
